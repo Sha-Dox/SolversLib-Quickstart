@@ -22,7 +22,7 @@ public class AlignToTagCommand extends CommandBase {
     private static final double Kd = 0.05;     // more damping for momentum + vision latency
     private static final double kStatic = 0.025;  // min turn power to overcome friction near target
 
-    // Inside this error band (tx units) we count as aligned and stop turning, so the robot settles
+    // Inside this error band (Ty units) we count as aligned and stop turning, so the robot settles
     // instead of hunting back and forth across the target.
     private static final double TURN_TOLERANCE = 2.65;
 
@@ -31,8 +31,8 @@ public class AlignToTagCommand extends CommandBase {
     private static final double SCAN_SPEED = 0.8;
 
     // State Variables
-    private double previousTx = 0;
-    private boolean hasPreviousTx = false;
+    private double previousTy = 0;
+    private boolean hasPreviousTy = false;
 
     // 0 = Not scanning (or undecided), 1 = Left, -1 = Right
     private double lockedScanDirection = 0;
@@ -50,8 +50,8 @@ public class AlignToTagCommand extends CommandBase {
 
     @Override
     public void initialize() {
-        previousTx = 0;
-        hasPreviousTx = false;
+        previousTy = 0;
+        hasPreviousTy = false;
         lockedScanDirection = 0; // Reset on start
         drive.aligned = false;
 
@@ -71,26 +71,26 @@ public class AlignToTagCommand extends CommandBase {
             // Reset this to 0 so next time we lose the tag, we recalculate fresh.
             lockedScanDirection = 0;
 
-            double tx = vision.getSteeringError();
+            double Ty = vision.getSteeringError();
 
             if(vision.getDistance() > 2.65) {
-                tx += alliance == BaseShooterOpMode.Alliance.BLUE ? -2.0 : 2.0;
+                Ty += alliance == BaseShooterOpMode.Alliance.BLUE ? -2.0 : 2.0;
             }
 
-            // Guard the first frame after (re)acquiring the tag so previousTx=0 doesn't cause a
+            // Guard the first frame after (re)acquiring the tag so previousTy=0 doesn't cause a
             // huge fake derivative kick.
-            double derivative = hasPreviousTx ? (tx - previousTx) : 0.0;
-            previousTx = tx;
-            hasPreviousTx = true;
+            double derivative = hasPreviousTy ? (Ty - previousTy) : 0.0;
+            previousTy = Ty;
+            hasPreviousTy = true;
 
-            boolean aligned = Math.abs(tx) <= TURN_TOLERANCE;
+            boolean aligned = Math.abs(Ty) <= TURN_TOLERANCE;
             drive.aligned = aligned;
 
             if (aligned) {
                 // Within the error margin: hold so we settle instead of hunting.
                 turnPower = 0.0;
             } else {
-                double pd = -(Kp * tx + Kd * derivative);
+                double pd = -(Kp * Ty + Kd * derivative);
                 // Static feedforward in the direction we're already turning: guarantees the last
                 // few degrees still move under a low Kp instead of stalling short of the target.
                 pd += Math.copySign(kStatic, pd);
@@ -116,8 +116,8 @@ public class AlignToTagCommand extends CommandBase {
             // We ignore the current heading now. We trust the turn.
             turnPower = lockedScanDirection * SCAN_SPEED;
 
-            previousTx = 0;
-            hasPreviousTx = false;
+            previousTy = 0;
+            hasPreviousTy = false;
             drive.aligned = false;
         }
 
