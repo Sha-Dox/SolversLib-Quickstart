@@ -95,7 +95,7 @@ public class FieldCentricTurret extends CommandOpMode {
             double bearing = Math.atan2(TARGET_Y - pose.y(), TARGET_X - pose.x());
             turretTarget = Math.toDegrees(normalize(bearing - pose.heading()));
         }
-        turret.setTargetAngle(turretTarget);
+        turret.setTargetWrapped(turretTarget);
 
         super.run(); // turret PID
         follower.update();

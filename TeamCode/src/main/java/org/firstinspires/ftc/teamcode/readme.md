@@ -27,7 +27,8 @@ FTC SDK 12.0 · SolversLib 0.3.6 · Pedro Pathing 3.0.2
    - Right stick up turns the turret CCW and `Turret Angle` goes **up**. If not, flip `Turret.MOTOR_REVERSED` / `ENCODER_REVERSED`.
    - If telemetry shows `TURRET STOPPED`, the encoder counts the wrong way: flip `Turret.ENCODER_REVERSED`.
    - Turn the turret one full turn by hand: angle should change by 360 (the encoder turns 5x, 100T/20T).
-   - Set `Turret.MIN_DEG` / `MAX_DEG` inside the wiring's hard stops.
+   - Turret travel is ±200° (`Turret.MIN_DEG` / `MAX_DEG`); past that it swings the long way round
+     to the same direction. Shrink it to fit the wiring once the turret is wired.
    - `X` spins the shooter; `Shooter Actual (RPM)` must be positive. If not, flip `Shooter.REVERSED`.
    - Intake: `RB` should pull a ball in; else flip `Intake.REVERSED`.
 3. Calibrate drive with Pedro AutoTune (`pedroPathing/Tuning.java`, open `http://192.168.43.1:10158`),

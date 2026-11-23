@@ -58,9 +58,11 @@ public class Turret extends SubsystemBase {
     // Angle of the turret at its power-on reference position (see class docs). Hardcoded on purpose.
     public static double REFERENCE_DEG = 0.0;
 
-    // Soft limits so the turret never winds up its wiring. Keep a margin inside the hard stops.
-    public static double MIN_DEG = -160; // TODO: set from the robot
-    public static double MAX_DEG = 160;  // TODO: set from the robot
+    // Soft limits: how far the turret may turn each way from forward, as if it had wiring to protect.
+    // With more than 360 deg of total travel every direction is reachable; when tracking pushes past a
+    // limit, setTargetWrapped() swings the turret the long way round to the same direction.
+    public static double MIN_DEG = -200;
+    public static double MAX_DEG = 200;
 
     // --- Position controller (PID + static feedforward) ---
     public static double kP = 0.02;     // TODO: tune
@@ -70,7 +72,7 @@ public class Turret extends SubsystemBase {
     public static double I_MAX_POWER = 0.1;
     public static double kS = 0.04;     // min power to break static friction
     public static double TOLERANCE_DEG = 1.5;
-    public static double MAX_POWER = 0.8;
+    public static double MAX_POWER = 1.0; // full speed, so a wrap-around swing is as quick as possible
 
     // Runaway guard (see periodic): how far the turret may move against its power before shutting off.
     // Big enough to ignore coasting through a direction change.
@@ -180,6 +182,30 @@ public class Turret extends SubsystemBase {
         targetDeg = clamp(deg);
     }
 
+    /**
+     * Point the turret in a direction (degrees, CCW positive, any range). Of all equivalent angles
+     * (deg + k*360) inside the soft limits, picks the one closest to where the turret is now. So it
+     * follows the target smoothly, and only when the target leaves the travel does it unwind the
+     * other way round. The 360 - (MAX - MIN) overlap acts as hysteresis, so it doesn't flip back and forth.
+     */
+    public void setTargetWrapped(double deg) {
+        setTargetAngle(wrapTarget(deg));
+    }
+
+    /** See {@link #setTargetWrapped}. Falls back to the nearest limit if no equivalent angle fits. */
+    public double wrapTarget(double deg) {
+        double nearest = deg - 360.0 * Math.round((deg - angleDeg) / 360.0);
+        double best = Double.NaN;
+        for (int k = -1; k <= 1; k++) {
+            double candidate = nearest + 360.0 * k;
+            if (candidate < MIN_DEG || candidate > MAX_DEG) continue;
+            if (Double.isNaN(best) || Math.abs(candidate - angleDeg) < Math.abs(best - angleDeg)) {
+                best = candidate;
+            }
+        }
+        return Double.isNaN(best) ? clamp(deg) : best;
+    }
+
     /** Raw power control with no position loop (soft limits still apply). */
     public void setManualPower(double power) {
         enabled = false;
@@ -198,9 +224,10 @@ public class Turret extends SubsystemBase {
         return Math.abs(targetDeg - angleDeg) <= TOLERANCE_DEG;
     }
 
-    /** True if {@code deg} had to be clamped, i.e. the turret can't reach it without the drivetrain turning. */
+    /** True if no equivalent of {@code deg} (mod 360) is inside the soft limits, so the robot must turn. */
     public boolean isOutOfRange(double deg) {
-        return deg < MIN_DEG || deg > MAX_DEG;
+        double d = deg - 360.0 * Math.floor((deg - MIN_DEG) / 360.0); // smallest equivalent >= MIN_DEG
+        return d > MAX_DEG;
     }
 
     /**

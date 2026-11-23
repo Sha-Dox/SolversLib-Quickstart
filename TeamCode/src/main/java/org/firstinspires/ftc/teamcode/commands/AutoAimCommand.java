@@ -36,7 +36,7 @@ public class AutoAimCommand extends CommandBase {
         if (!aimEnabled.getAsBoolean()) {
             turret.setTargetAngle(0.0);
         } else if (aim.hasSolution()) {
-            turret.setTargetAngle(aim.getTurretTargetDeg() + trimDeg.getAsDouble());
+            turret.setTargetWrapped(aim.getTurretTargetDeg() + trimDeg.getAsDouble());
         }
         // No solution (no pose and no tags): leave the turret where it was last pointed.
     }
