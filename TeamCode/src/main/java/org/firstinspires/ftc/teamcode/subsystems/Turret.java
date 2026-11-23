@@ -72,6 +72,11 @@ public class Turret extends SubsystemBase {
     public static double TOLERANCE_DEG = 1.5;
     public static double MAX_POWER = 0.8;
 
+    // Runaway guard (see periodic): how far the turret may move against its power before shutting off.
+    // Big enough to ignore coasting through a direction change.
+    public static double RUNAWAY_DEG = 20.0;
+    public static double RUNAWAY_MIN_POWER = 0.3;
+
     private final DcMotorEx motor;
     private final DcMotorEx encoder;
     private final TelemetryData telemetry;
@@ -83,8 +88,10 @@ public class Turret extends SubsystemBase {
     private double integral = 0.0;
     private boolean enabled = true;
     private double manualPower = 0.0;
-    private double lastManualAngle = 0.0;
-    private Boolean encoderSignOk = null;
+    private double lastAngle = 0.0;
+    private double lastPower = 0.0;
+    private double wrongWayDeg = 0.0;
+    private boolean faulted = false;
 
     public Turret(HardwareMap hardwareMap, TelemetryData telemetry) {
         this.telemetry = telemetry;
@@ -97,6 +104,7 @@ public class Turret extends SubsystemBase {
 
         // Deliberately NO encoder reset here: the count since power-on is the source of truth.
         angleDeg = readAngle();
+        lastAngle = angleDeg;
         targetDeg = angleDeg;
         timer.reset();
     }
@@ -107,20 +115,7 @@ public class Turret extends SubsystemBase {
 
         double power;
         if (!enabled) {
-            // Manual mode (tuning OpMode): still refuse to drive past the soft limits.
-            power = manualPower;
-            if ((angleDeg >= MAX_DEG && power > 0) || (angleDeg <= MIN_DEG && power < 0)) {
-                power = 0.0;
-            }
-            // Sign check: under clear positive power the angle must rise. If it falls, the encoder
-            // and motor disagree and the PID would run away, so tell the person running the test.
-            double moved = angleDeg - lastManualAngle;
-            if (Math.abs(power) > 0.15 && Math.abs(moved) > 0.5) {
-                encoderSignOk = Math.signum(moved) == Math.signum(power);
-            }
-            lastManualAngle = angleDeg;
-            telemetry.addData("Turret Encoder Sign", encoderSignOk == null ? "move the turret to check"
-                    : encoderSignOk ? "OK" : "WRONG -> flip Turret.ENCODER_REVERSED");
+            power = manualPower; // manual mode (tuning OpMode)
         } else {
             double error = targetDeg - angleDeg;
             double dt = Math.max(timer.seconds(), 1e-3);
@@ -145,6 +140,33 @@ public class Turret extends SubsystemBase {
         }
 
         power = Math.max(-MAX_POWER, Math.min(MAX_POWER, power));
+
+        // Never push further past a soft limit, in any mode.
+        if ((angleDeg >= MAX_DEG && power > 0) || (angleDeg <= MIN_DEG && power < 0)) {
+            power = 0.0;
+        }
+
+        // Runaway guard: with power applied the angle must move the same way. If it keeps moving the
+        // other way, the motor and encoder directions disagree and the PID would drive the turret into
+        // its wiring, so shut it off until the OpMode restarts.
+        double moved = angleDeg - lastAngle;
+        lastAngle = angleDeg;
+        if (Math.abs(lastPower) > RUNAWAY_MIN_POWER) {
+            double progress = moved * Math.signum(lastPower);
+            if (progress > 0.2) {
+                wrongWayDeg = 0.0;
+            } else if (progress < 0) {
+                wrongWayDeg -= progress;
+            }
+        }
+        if (wrongWayDeg > RUNAWAY_DEG) {
+            faulted = true;
+        }
+        if (faulted) {
+            power = 0.0;
+            telemetry.addData("TURRET STOPPED", "motor/encoder disagree: flip Turret.ENCODER_REVERSED");
+        }
+        lastPower = power;
         motor.setPower(power);
 
         telemetry.addData("Turret Angle", angleDeg);
@@ -160,9 +182,6 @@ public class Turret extends SubsystemBase {
 
     /** Raw power control with no position loop (soft limits still apply). */
     public void setManualPower(double power) {
-        if (enabled) {
-            lastManualAngle = angleDeg; // entering manual mode: start the sign check fresh
-        }
         enabled = false;
         manualPower = power;
     }
@@ -195,6 +214,7 @@ public class Turret extends SubsystemBase {
         encoder.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
         angleDeg = REFERENCE_DEG;
         targetDeg = REFERENCE_DEG;
+        lastAngle = REFERENCE_DEG;
         lastError = 0.0;
         integral = 0.0;
     }

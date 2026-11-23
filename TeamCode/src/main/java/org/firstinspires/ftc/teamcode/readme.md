@@ -25,7 +25,7 @@ FTC SDK 12.0 · SolversLib 0.3.6 · Pedro Pathing 3.0.2
    Don't plug the Through Bore into the `shooter` port: the shooter resets its own encoder.
 2. Run **Mechanism Test**. Check in order:
    - Right stick up turns the turret CCW and `Turret Angle` goes **up**. If not, flip `Turret.MOTOR_REVERSED` / `ENCODER_REVERSED`.
-   - `Turret Encoder Sign` must say OK while you drive it; if it says WRONG, flip `Turret.ENCODER_REVERSED`.
+   - If telemetry shows `TURRET STOPPED`, the encoder counts the wrong way: flip `Turret.ENCODER_REVERSED`.
    - Turn the turret one full turn by hand: angle should change by 360 (the encoder turns 5x, 100T/20T).
    - Set `Turret.MIN_DEG` / `MAX_DEG` inside the wiring's hard stops.
    - `X` spins the shooter; `Shooter Actual (RPM)` must be positive. If not, flip `Shooter.REVERSED`.
