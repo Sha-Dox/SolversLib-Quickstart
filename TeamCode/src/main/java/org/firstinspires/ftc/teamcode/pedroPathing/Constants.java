@@ -22,6 +22,13 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
  * If you use a different drivetrain or localizer, swap the config classes and {@link #createFollower} to match.
  */
 public class Constants {
+    // Drivetrain geometry: distances between wheel centers. The robot's tracking center (the point the
+    // Pinpoint pod offsets and AimSolver's turret offset are measured from) is the middle of this
+    // rectangle. Pedro 3 doesn't need these directly; AutoTune measures the drive's behaviour itself.
+    public static final double TRACK_WIDTH_MM = 174.0;  // left wheels <-> right wheels
+    public static final double WHEELBASE_MM = 236.425;  // front wheels <-> back wheels
+
+    // Control Hub motor ports: 0 = rb, 1 = rf, 2 = lb, 3 = lf (set in the Driver Station config).
     public static MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
         c.frontLeftName.set("lf");
         c.backLeftName.set("lb");
@@ -40,7 +47,8 @@ public class Constants {
     public static PinpointConfig localizerConfig = new PinpointConfig(c -> {
         c.name.set("pinpoint");
         // TODO: calibrate with the Pinpoint tuner. Carried over from the old robot:
-        // xPod = forward pod's sideways offset (left +), yPod = strafe pod's forward offset (forward +).
+        // xPod = forward pod's sideways offset (left +), yPod = strafe pod's forward offset (forward +),
+        // both measured from the center of the wheel rectangle (TRACK_WIDTH_MM x WHEELBASE_MM).
         c.xPodOffset.set(-84.0);
         c.yPodOffset.set(-168.0);
         c.offsetUnits.set(DistanceUnit.MM);

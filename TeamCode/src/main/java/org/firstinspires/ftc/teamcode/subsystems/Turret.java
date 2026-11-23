@@ -35,13 +35,25 @@ public class Turret extends SubsystemBase {
     // turret motor's own port; if it's on another motor's port (e.g. the intake, which runs open loop),
     // put that motor's config name here.
     public static String ENCODER_NAME = "turret";
-    public static boolean MOTOR_REVERSED = false;   // flip so positive power turns the turret CCW
-    public static boolean ENCODER_REVERSED = false; // flip so the angle increases when turning CCW
+    // Gearing: turret ring 100T, driven by a 50T gear on a goBILDA 435 rpm motor, with a 20T gear on the
+    // REV Through Bore. Both gears mesh directly with the turret, so the motor and the encoder spin the
+    // OPPOSITE way to the turret (turret right/CW -> motor and encoder CCW).
+    public static final double MOTOR_TO_TURRET_RATIO = 100.0 / 50.0; // 2 motor revs per turret rev
+    public static final double MOTOR_RPM = 435;                      // -> turret max ~217 rpm
+    // Encoder revolutions per turret revolution: 100T / 20T.
+    public static double ENCODER_TO_TURRET_RATIO = 100.0 / 20.0;
 
-    // REV Through Bore: 8192 counts per revolution of the encoder.
+    // Positive power must turn the turret CCW (left). Because of the gear reversal that means the motor
+    // spins CW. The SDK's goBILDA motor spins CCW (seen from the shaft end) on positive FORWARD power,
+    // so with the motor shaft pointing UP into the turret gear it has to be REVERSE.
+    // TODO: confirm in Mechanism Test (stick up -> turret turns left); flip if the motor hangs shaft-down.
+    public static boolean MOTOR_REVERSED = true;
+    // Flip so the angle increases while the turret turns CCW. Mechanism Test flags a wrong sign.
+    public static boolean ENCODER_REVERSED = false;
+
+    // REV Through Bore (quadrature A/B into a motor encoder port): 8192 counts per encoder revolution,
+    // so 8192 * 5 = 40960 counts per turret revolution.
     public static double ENCODER_CPR = 8192;
-    // Encoder revolutions per turret revolution. 1.0 if the encoder sits on the turret axis itself.
-    public static double ENCODER_TO_TURRET_RATIO = 1.0; // TODO: verify
 
     // Angle of the turret at its power-on reference position (see class docs). Hardcoded on purpose.
     public static double REFERENCE_DEG = 0.0;
@@ -71,6 +83,8 @@ public class Turret extends SubsystemBase {
     private double integral = 0.0;
     private boolean enabled = true;
     private double manualPower = 0.0;
+    private double lastManualAngle = 0.0;
+    private Boolean encoderSignOk = null;
 
     public Turret(HardwareMap hardwareMap, TelemetryData telemetry) {
         this.telemetry = telemetry;
@@ -98,6 +112,15 @@ public class Turret extends SubsystemBase {
             if ((angleDeg >= MAX_DEG && power > 0) || (angleDeg <= MIN_DEG && power < 0)) {
                 power = 0.0;
             }
+            // Sign check: under clear positive power the angle must rise. If it falls, the encoder
+            // and motor disagree and the PID would run away, so tell the person running the test.
+            double moved = angleDeg - lastManualAngle;
+            if (Math.abs(power) > 0.15 && Math.abs(moved) > 0.5) {
+                encoderSignOk = Math.signum(moved) == Math.signum(power);
+            }
+            lastManualAngle = angleDeg;
+            telemetry.addData("Turret Encoder Sign", encoderSignOk == null ? "move the turret to check"
+                    : encoderSignOk ? "OK" : "WRONG -> flip Turret.ENCODER_REVERSED");
         } else {
             double error = targetDeg - angleDeg;
             double dt = Math.max(timer.seconds(), 1e-3);
@@ -137,6 +160,9 @@ public class Turret extends SubsystemBase {
 
     /** Raw power control with no position loop (soft limits still apply). */
     public void setManualPower(double power) {
+        if (enabled) {
+            lastManualAngle = angleDeg; // entering manual mode: start the sign check fresh
+        }
         enabled = false;
         manualPower = power;
     }

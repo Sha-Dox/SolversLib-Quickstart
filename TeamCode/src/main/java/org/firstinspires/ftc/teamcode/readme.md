@@ -6,12 +6,12 @@ FTC SDK 12.0 · SolversLib 0.3.6 · Pedro Pathing 3.0.2
 
 | Name        | Device                              | Notes                                             |
 |-------------|-------------------------------------|---------------------------------------------------|
-| `lf` `lb` `rf` `rb` | drive motors                | left side reversed (`pedroPathing/Constants`)     |
+| `rb` `rf` `lb` `lf` | drive motors, Control Hub ports 0, 1, 2, 3 | left side reversed (`pedroPathing/Constants`) |
 | `pinpoint`  | goBILDA Pinpoint (I2C)              | 4-bar pods                                        |
 | `intake`    | intake motor                        | open loop                                         |
 | `shooter`   | flywheel motor                      | velocity from its own encoder                     |
-| `turret`    | turret motor                        |                                                   |
-| (encoder)   | REV Through Bore, quadrature        | plug into the `turret` motor's encoder port, or set `Turret.ENCODER_NAME` to the motor whose port it uses |
+| `turret`    | goBILDA 435 rpm, 50T → 100T turret   | Expansion Hub (Control Hub's 4 ports are the drive) |
+| (encoder)   | REV Through Bore, 20T on the turret, quadrature (A/B) | plug into the `turret` motor's encoder port, or set `Turret.ENCODER_NAME` to the motor whose port it uses |
 | `limelight` | Limelight 3A (Ethernet/USB)         | pipeline 0 = AprilTag, 36h11                      |
 
 ## First flash checklist
@@ -25,7 +25,8 @@ FTC SDK 12.0 · SolversLib 0.3.6 · Pedro Pathing 3.0.2
    Don't plug the Through Bore into the `shooter` port: the shooter resets its own encoder.
 2. Run **Mechanism Test**. Check in order:
    - Right stick up turns the turret CCW and `Turret Angle` goes **up**. If not, flip `Turret.MOTOR_REVERSED` / `ENCODER_REVERSED`.
-   - Turn the turret one full turn by hand: angle should change by 360. If not, fix `Turret.ENCODER_TO_TURRET_RATIO`.
+   - `Turret Encoder Sign` must say OK while you drive it; if it says WRONG, flip `Turret.ENCODER_REVERSED`.
+   - Turn the turret one full turn by hand: angle should change by 360 (the encoder turns 5x, 100T/20T).
    - Set `Turret.MIN_DEG` / `MAX_DEG` inside the wiring's hard stops.
    - `X` spins the shooter; `Shooter Actual (RPM)` must be positive. If not, flip `Shooter.REVERSED`.
    - Intake: `RB` should pull a ball in; else flip `Intake.REVERSED`.
