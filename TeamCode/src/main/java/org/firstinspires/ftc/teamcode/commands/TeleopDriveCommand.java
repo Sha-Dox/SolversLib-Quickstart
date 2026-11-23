@@ -1,6 +1,5 @@
 package org.firstinspires.ftc.teamcode.commands;
 
-import com.seattlesolvers.solverslib.command.Command;
 import com.seattlesolvers.solverslib.command.CommandBase;
 
 import org.firstinspires.ftc.teamcode.subsystems.Drive;
@@ -29,12 +28,6 @@ public class TeleopDriveCommand extends CommandBase {
 
         // Register the subsystem so the scheduler knows this command requires the Drive
         addRequirements(m_drive);
-    }
-
-    @Override
-    public void initialize() {
-        // PedroPathing specific: Ensure the follower is in TeleOp mode
-        m_drive.startTeleopDrive();
     }
 
     @Override

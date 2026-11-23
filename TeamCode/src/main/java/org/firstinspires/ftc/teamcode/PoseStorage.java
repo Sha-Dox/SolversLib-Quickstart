@@ -1,12 +1,13 @@
 package org.firstinspires.ftc.teamcode;
 
-import com.pedropathing.geometry.Pose;
+import com.pedropathing.math.Pose;
 
 /**
  * Simple static field to store the pose between OpModes.
- * Auto writes to this, Teleop reads from this.
+ * Drive writes the latest good pose every loop, so teleop picks up wherever auto left the robot.
  */
 public class PoseStorage {
-    // Default to 0,0,0 if no auto was run
-    public static Pose currentPose = new Pose(56.000, 8.000, Math.toRadians(90));
+    public static Pose currentPose = new Pose(0, 0, 0);
+    // False until an OpMode has tracked a pose since the app started (no auto run yet).
+    public static boolean hasPose = false;
 }

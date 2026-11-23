@@ -7,64 +7,68 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
-
-// SolversLib Import
-import com.seattlesolvers.solverslib.command.Command;
-import com.seattlesolvers.solverslib.command.FunctionalCommand;
 import com.seattlesolvers.solverslib.command.SubsystemBase;
 import com.seattlesolvers.solverslib.util.TelemetryData;
 
+/**
+ * Single-motor flywheel with velocity PIDF and battery-voltage feedforward compensation.
+ * Velocity is read from the shooter motor's own encoder.
+ */
 @Config
 public class Shooter extends SubsystemBase {
 
-    // --- Hardware ---
-    private final DcMotorEx shooterL;
-    private final DcMotorEx shooterR;
-    private final VoltageSensor voltageSensor;
-    private final TelemetryData telemetry;
-
-    // --- Motor Constants (YOU MUST VERIFY THESE) ---
-    // Example: GoBilda Yellow Jacket 1:1 is 28.
-    // Example: Rev HD Hex is 28.
-    // Example: If you have a 1:1 motor but a 2:1 belt drive on the shooter, ratio is 2.0
+    // --- Motor constants (verify for your motor) ---
+    // goBILDA Yellow Jacket / REV HD Hex bare motor: 28 counts per motor revolution.
     public static double MOTOR_CPR = 28;
+    // Flywheel revolutions per motor revolution (1.0 for direct drive).
     public static double GEAR_RATIO = 1.0;
+    public static boolean REVERSED = false;
 
-    // --- PIDF Constants ---
-    // Note: Since we are controlling in TPS internally, these values might need
-    // retuning if you were previously tuning based on a different unit scale.
-    public static double Kp = 0.008; //TODO
-    public static double Kd = 0.0;
-    public static double Kf = 0.0005;
+    // --- PIDF (units: motor power per ticks/sec) ---
+    // Tune order: kF first (P=I=D=0, raise kF until it holds speed), then kP for recovery after a shot,
+    // then a little kI only if it settles below target. All live-editable from FTC Dashboard / Panels.
+    public static double kP = 0.008;   // TODO: tune
+    public static double kI = 0.0;
+    public static double kD = 0.0;
+    public static double I_MAX_POWER = 0.15; // cap on the integral term's contribution
+    public static double kF = 0.0005;  // TODO: tune so kF * target TPS ~= the power that holds speed
+    public static double kS = 0.02;    // small constant to overcome friction
 
-    // --- Voltage Compensation Config ---
-    public static double VOLTAGE_SENSOR_POLLING_RATE = 40;
+    // --- Voltage compensation ---
+    public static double VOLTAGE_POLL_HZ = 40;
     public static double NOMINAL_VOLTAGE = 12.4;
 
-    // --- State Variables ---
-    private double currentTargetVelocityTPS = 0; // We store target in TPS for the PID
-    private double currentVelocityTPS = 0;
-    private double lastError = 0;
-    private double cachedVoltage = 12.0;
+    // RPM the shooter is considered "ready" within.
+    public static double READY_TOLERANCE_RPM = 75;
 
+    // Lookup table: distance to the goal (inches) -> flywheel RPM. Fill it in from test shots: park at
+    // a distance, adjust RPM on the dashboard until shots land, write the pair here. Keep DISTANCE_IN
+    // ascending. Values in between are linearly interpolated; outside the table the end value is used.
+    public static double[] DISTANCE_IN = {24, 48, 72, 96, 120, 144};          // TODO: tune
+    public static double[] RPM_AT_DISTANCE = {2400, 2700, 3000, 3300, 3600, 3900}; // TODO: tune
+    public static double DEFAULT_RPM = 3000; // used when the Limelight can't see the goal
+
+    private final DcMotorEx motor;
+    private final VoltageSensor voltageSensor;
+    private final TelemetryData telemetry;
     private final ElapsedTime pidTimer = new ElapsedTime();
     private final ElapsedTime voltageTimer = new ElapsedTime();
 
+    private double targetTps = 0.0;
+    private double currentTps = 0.0;
+    private double lastError = 0.0;
+    private double integral = 0.0;
+    private double cachedVoltage;
+
     public Shooter(HardwareMap hardwareMap, TelemetryData telemetry) {
         this.telemetry = telemetry;
-
-        shooterL = hardwareMap.get(DcMotorEx.class, "shooterL");
-        shooterR = hardwareMap.get(DcMotorEx.class, "shooterR");
+        motor = hardwareMap.get(DcMotorEx.class, "shooter");
         voltageSensor = hardwareMap.voltageSensor.iterator().next();
 
-        shooterL.setDirection(DcMotorSimple.Direction.REVERSE);
-        shooterR.setDirection(DcMotorSimple.Direction.FORWARD);
-
-        shooterR.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-        shooterR.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-
-        // Ensure Left motor follows the same mode (even if not using its encoder)
-        shooterL.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
+        motor.setDirection(REVERSED ? DcMotorSimple.Direction.REVERSE : DcMotorSimple.Direction.FORWARD);
+        motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         cachedVoltage = voltageSensor.getVoltage();
         pidTimer.reset();
@@ -73,86 +77,89 @@ public class Shooter extends SubsystemBase {
 
     @Override
     public void periodic() {
-        // --- 1. Update Cached Voltage ---
-        if (voltageTimer.milliseconds() > (1000 / VOLTAGE_SENSOR_POLLING_RATE)) {
+        if (voltageTimer.milliseconds() > 1000.0 / VOLTAGE_POLL_HZ) {
             cachedVoltage = voltageSensor.getVoltage();
             voltageTimer.reset();
         }
 
-        // --- 2. Get current velocity (Native TPS) ---
-        currentVelocityTPS = shooterR.getVelocity();
+        currentTps = motor.getVelocity();
+        double error = targetTps - currentTps;
 
-        // --- 3. Calculate Error (in TPS) ---
-        double error = currentTargetVelocityTPS - currentVelocityTPS;
-
-        // --- 4. Time Delta ---
-        double dt = pidTimer.seconds();
+        double dt = Math.max(pidTimer.seconds(), 1e-3);
         pidTimer.reset();
-
-        // --- 5. PID Calculations ---
-        double pTerm = Kp * error;
-
         double derivative = (error - lastError) / dt;
-        double dTerm = Kd * derivative;
-
-        // Voltage Feedforward
-        double voltageScale = cachedVoltage / NOMINAL_VOLTAGE;
-        if (voltageScale < 0.5) voltageScale = 0.5; // Sanity check
-
-        double adjustedKf = Kf / voltageScale;
-        double fTerm = adjustedKf * currentTargetVelocityTPS;
-
-        // --- 6. Final Power ---
-        double power = pTerm + dTerm + fTerm + 0.02;
-
         lastError = error;
 
-        // --- 7. Apply to motors ---
-        double safePower = Math.max(-1.0, Math.min(1.0, power));
+        double voltageScale = Math.max(0.5, cachedVoltage / NOMINAL_VOLTAGE);
 
-        if (Math.abs(currentTargetVelocityTPS) < 10) { // Deadzone for stopping
-            safePower = 0.0;
+        if (Math.abs(targetTps) < 10) {
+            integral = 0.0;
+        } else if (kI != 0) {
+            integral += error * dt;
+            double iLimit = I_MAX_POWER / kI;
+            integral = Math.max(-Math.abs(iLimit), Math.min(Math.abs(iLimit), integral));
         }
 
-        // BUG FIX: You were setting power to 1.0 hardcoded here previously!
-        shooterL.setPower(safePower);
-        shooterR.setPower(safePower);
+        double power = kP * error + kI * integral + kD * derivative + (kF / voltageScale) * targetTps + kS;
 
-        // --- 8. Telemetry (Converted to RPM for you) ---
-        telemetry.addData("Shooter Target (RPM)", ticksToRPM(currentTargetVelocityTPS));
-        telemetry.addData("Shooter Actual (RPM)", ticksToRPM(currentVelocityTPS));
-        telemetry.addData("Shooter Power", safePower);
-        telemetry.addData("Shooter Voltage", cachedVoltage);
+        if (Math.abs(targetTps) < 10) {
+            power = 0.0; // stopped: coast down instead of fighting the flywheel's momentum
+        }
+        // Never drive the flywheel backwards to slow it down.
+        power = Math.max(0.0, Math.min(1.0, power));
+        motor.setPower(power);
+
+        telemetry.addData("Shooter Target (RPM)", tpsToRpm(targetTps));
+        telemetry.addData("Shooter Actual (RPM)", tpsToRpm(currentTps));
+        telemetry.addData("Shooter Power", power);
+        telemetry.addData("Battery (V)", cachedVoltage);
     }
 
-    /**
-     * Sets the target velocity in RPM.
-     *
-     * @param rpm Revolutions Per Minute
-     */
-    public void setTargetVelocity(double rpm) {
-        // Convert the user's RPM request to the Hardware's TPS requirement
-        this.currentTargetVelocityTPS = rpmToTicks(rpm);
+    public void setTargetRpm(double rpm) {
+        targetTps = rpmToTps(rpm);
     }
 
-    public double getError() {
-        return ticksToRPM(currentTargetVelocityTPS - currentVelocityTPS);
+    /** Spin to the RPM for a shot from {@code distanceIn} inches. */
+    public void setTargetFromDistance(double distanceIn) {
+        setTargetRpm(rpmForDistance(distanceIn));
     }
 
-    public double getTargetVelocity() {
-        return ticksToRPM(currentTargetVelocityTPS);
-    }
-    // --- Helper Conversion Methods ---
-
-    private double rpmToTicks(double rpm) {
-        // RPM / 60 = RPS
-        // RPS * CPR = TPS
-        return (rpm / 60.0) * (MOTOR_CPR * GEAR_RATIO);
+    public void stop() {
+        targetTps = 0.0;
     }
 
-    private double ticksToRPM(double tps) {
-        // TPS / CPR = RPS
-        // RPS * 60 = RPM
-        return (tps / (MOTOR_CPR * GEAR_RATIO)) * 60.0;
+    public double getTargetRpm() {
+        return tpsToRpm(targetTps);
+    }
+
+    public double getRpm() {
+        return tpsToRpm(currentTps);
+    }
+
+    public boolean isReady() {
+        return targetTps > 0 && Math.abs(tpsToRpm(targetTps - currentTps)) <= READY_TOLERANCE_RPM;
+    }
+
+    public static double rpmForDistance(double distanceIn) {
+        double[] d = DISTANCE_IN;
+        double[] r = RPM_AT_DISTANCE;
+        int n = Math.min(d.length, r.length);
+        if (n == 0) return DEFAULT_RPM;
+        if (distanceIn <= d[0]) return r[0];
+        for (int i = 1; i < n; i++) {
+            if (distanceIn <= d[i]) {
+                double t = (distanceIn - d[i - 1]) / (d[i] - d[i - 1]);
+                return r[i - 1] + t * (r[i] - r[i - 1]);
+            }
+        }
+        return r[n - 1];
+    }
+
+    private static double rpmToTps(double rpm) {
+        return rpm / 60.0 * MOTOR_CPR / GEAR_RATIO;
+    }
+
+    private static double tpsToRpm(double tps) {
+        return tps / (MOTOR_CPR / GEAR_RATIO) * 60.0;
     }
 }

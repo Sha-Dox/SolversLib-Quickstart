@@ -1,160 +1,162 @@
 package org.firstinspires.ftc.teamcode.subsystems;
 
+import com.acmerobotics.dashboard.config.Config;
 import com.qualcomm.hardware.limelightvision.LLResult;
 import com.qualcomm.hardware.limelightvision.LLResultTypes;
-import com.qualcomm.hardware.limelightvision.LLStatus;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.seattlesolvers.solverslib.command.SubsystemBase;
 import com.seattlesolvers.solverslib.util.TelemetryData;
 
+import org.firstinspires.ftc.teamcode.Alliance;
+import org.firstinspires.ftc.teamcode.FieldConstants;
+import org.firstinspires.ftc.teamcode.FieldConstants.Cell;
+
 import java.util.List;
 
+/**
+ * Limelight 3A tracking of our alliance's CELL AprilTag clusters.
+ * <p>
+ * Each CELL has 4 tags; we average the visible ones into one cluster reading. If both of our CELLS are
+ * in view, the one higher in the image (larger ty) is the up-facing CELL, which is the one we shoot at.
+ * <p>
+ * The Limelight pipeline must be an AprilTag pipeline using the 36h11 family.
+ */
+@Config
 public class Vision extends SubsystemBase {
+
+    // --- Mounting geometry (measure on the robot) ---
+    public static double CAMERA_LENS_HEIGHT_IN = 14.0;   // TODO: floor -> lens center
+    public static double CAMERA_MOUNT_ANGLE_DEG = 30.0;  // TODO: lens tilt up from horizontal
+
+    public static int PIPELINE = 0;
+
+    // A game piece passing in front of the lens blocks the tag for a few frames. Keep the last good
+    // reading for this long so the turret and shooter don't drop out mid-shot.
+    public static long TARGET_MEMORY_MS = 250;
 
     private final Limelight3A limelight;
     private final TelemetryData telemetry;
 
-    // --- Configuration Constants ---
-    private static final double CAMERA_LENS_HEIGHT = 0.433;
-    private static final double TARGET_HEIGHT = 29.25 * 0.0254;
-    private static final double CAMERA_MOUNT_ANGLE_DEGREES = 20.0;
+    private Alliance alliance = Alliance.RED;
 
-    // Occlusion Handling:
-    // If a ball blocks the camera, we keep the last 'tx' and 'distance' for this many ms.
-    private static final long TARGET_MEMORY_MS = 250;
-
-    // --- State Variables ---
-    private double currentDistance = 0.0;
-    private double currentTx = 0.0;
-    private double currentTy = 0.0;
-    private double currentTa = 0.0;
-
-    private boolean isCurrentlyVisible = false;
-    private long lastValidTargetTime = 0;
-    private int targetTagId = -1;
+    private double tx = 0.0;
+    private double ty = 0.0;
+    private double distanceIn = 0.0;
+    private Cell cell = null;
+    private boolean visibleNow = false;
+    private boolean newFrame = false;
+    private long lastFrameStamp = -1;
+    private long lastSeenMs = 0;
 
     public Vision(HardwareMap hardwareMap, TelemetryData telemetry) {
         this.telemetry = telemetry;
-        this.limelight = hardwareMap.get(Limelight3A.class, "limelight");
-
-        limelight.pipelineSwitch(0);
+        limelight = hardwareMap.get(Limelight3A.class, "limelight");
+        limelight.pipelineSwitch(PIPELINE);
         limelight.setPollRateHz(100);
         limelight.start();
-
-        telemetry.addData("Limelight", "Initialized & Started");
-        telemetry.update();
     }
 
     @Override
     public void periodic() {
-        LLStatus status = limelight.getStatus();
         LLResult result = limelight.getLatestResult();
 
-        boolean validFrameInput = false;
-        double rawTx = 0;
-        double rawTy = 0;
-        double rawTa = 0;
+        // The loop often runs faster than the camera, so the same frame comes back more than once.
+        // The aim solver should only learn from genuinely new frames.
+        newFrame = false;
+        if (result != null) {
+            long stamp = result.getControlHubTimeStamp();
+            newFrame = stamp != lastFrameStamp;
+            lastFrameStamp = stamp;
+        }
+
+        // Average tx/ty per CELL over the visible tags of that CELL's cluster.
+        double[] sumTx = new double[Cell.values().length];
+        double[] sumTy = new double[Cell.values().length];
+        int[] count = new int[Cell.values().length];
 
         if (result != null && result.isValid()) {
             List<LLResultTypes.FiducialResult> fiducials = result.getFiducialResults();
-
-            if (targetTagId != -1) {
-                // Strict ID mode
-                for (LLResultTypes.FiducialResult tag : fiducials) {
-                    if (tag.getFiducialId() == targetTagId) {
-                        rawTx = tag.getTargetXDegrees();
-                        rawTy = tag.getTargetYDegrees();
-                        rawTa = tag.getTargetArea();
-                        validFrameInput = true;
-                        break;
-                    }
-                }
-            } else {
-                // Wildcard mode
-                rawTx = result.getTx();
-                rawTy = result.getTy();
-                rawTa = result.getTa();
-                if (Math.abs(rawTx) > 0.001 || Math.abs(rawTy) > 0.001) {
-                    validFrameInput = true;
-                }
+            for (LLResultTypes.FiducialResult tag : fiducials) {
+                Cell c = FieldConstants.cellOfTag(alliance, tag.getFiducialId());
+                if (c == null) continue;
+                sumTx[c.ordinal()] += tag.getTargetXDegrees();
+                sumTy[c.ordinal()] += tag.getTargetYDegrees();
+                count[c.ordinal()]++;
             }
         }
 
-        // --- CORE LOGIC CHANGE ---
-        if (validFrameInput) {
-            // Case 1: We see the target RIGHT NOW.
-            isCurrentlyVisible = true;
-            lastValidTargetTime = System.currentTimeMillis();
-
-            // Calculate Distance
-            double angleToGoalDegrees = CAMERA_MOUNT_ANGLE_DEGREES + rawTy;
-            double angleToGoalRadians = Math.toRadians(angleToGoalDegrees);
-            currentDistance = (TARGET_HEIGHT - CAMERA_LENS_HEIGHT) / Math.tan(angleToGoalRadians);
-
-            // Update Aiming Data directly
-            currentTx = rawTx;
-            currentTy = rawTy;
-            currentTa = rawTa;
-
-        } else {
-            // Case 2: We DO NOT see the target right now.
-            isCurrentlyVisible = false;
-
-            // Check how long it has been since we last saw it
-            long timeSinceLastSeen = System.currentTimeMillis() - lastValidTargetTime;
-
-            if (timeSinceLastSeen > TARGET_MEMORY_MS) {
-                // Case 2a: It's been too long (Target truly lost).
-                // Reset everything to 0 to prevent the robot from spinning at the last known speed forever.
-                currentTx = 0.0;
-                currentTy = 0.0;
-                currentDistance = 0.0;
+        Cell best = null;
+        double bestTy = -Double.MAX_VALUE;
+        for (Cell c : Cell.values()) {
+            if (count[c.ordinal()] == 0) continue;
+            double avgTy = sumTy[c.ordinal()] / count[c.ordinal()];
+            if (avgTy > bestTy) {
+                bestTy = avgTy;
+                best = c;
             }
-            // Case 2b: It has been LESS than 500ms (Ball blocking camera).
-            // Do NOTHING. We keep the old currentTx and currentDistance values.
-            // This effectively "freezes" the data during the shot.
         }
 
-        // --- Telemetry ---
-        telemetry.addData("Limelight", status.getName());
-        if (hasValidTarget()) {
-            telemetry.addData("Target", isCurrentlyVisible ? "LOCKED" : "CACHED (Occluded)");
-            telemetry.addData("tx", currentTx);
-            telemetry.addData("Dist", currentDistance);
+        visibleNow = best != null;
+        if (visibleNow) {
+            lastSeenMs = System.currentTimeMillis();
+            cell = best;
+            tx = sumTx[best.ordinal()] / count[best.ordinal()];
+            ty = bestTy;
+            double angle = Math.toRadians(CAMERA_MOUNT_ANGLE_DEG + ty);
+            double rise = FieldConstants.UP_CELL_TAG_HEIGHT_IN - CAMERA_LENS_HEIGHT_IN;
+            distanceIn = angle > 0.01 ? rise / Math.tan(angle) : 0.0;
+        } else if (!hasTarget()) {
+            // Lost for longer than the memory window: clear so nothing acts on a stale reading.
+            tx = 0.0;
+            ty = 0.0;
+            distanceIn = 0.0;
+        }
+
+        if (hasTarget()) {
+            telemetry.addData("Tag", (visibleNow ? "LOCKED " : "CACHED ") + cell);
+            telemetry.addData("tx / ty", String.format("%.1f / %.1f", tx, ty));
+            telemetry.addData("Tag Dist (in)", distanceIn);
         } else {
-            telemetry.addData("Target", "SEARCHING...");
+            telemetry.addData("Tag", "SEARCHING");
         }
     }
 
-    // --- Setters & Getters ---
-
-    public void setTargetTagId(int id) {
-        this.targetTagId = id;
+    public void setAlliance(Alliance alliance) {
+        this.alliance = alliance;
     }
 
-    /**
-     * Gets the horizontal offset from the crosshair to the target.
-     * WARNING: If the camera is occluded (blocked), this returns the LAST KNOWN value.
-     */
-    public double getSteeringError() {
-        return currentTx;
+    /** True if a CELL is visible now or was within {@link #TARGET_MEMORY_MS}. */
+    public boolean hasTarget() {
+        return visibleNow || System.currentTimeMillis() - lastSeenMs < TARGET_MEMORY_MS;
     }
 
-    public double getDistance() {
-        return currentDistance;
+    /** True if a CELL is visible in a frame that arrived this loop (not one already seen). */
+    public boolean hasNewTargetFrame() {
+        return visibleNow && newFrame;
     }
 
-    /**
-     * @return true if the target is visible OR was visible within the memory threshold.
-     */
-    public boolean hasValidTarget() {
-        // We consider the target "valid" if we see it, OR if we saw it recently.
-        return isCurrentlyVisible || (System.currentTimeMillis() - lastValidTargetTime < TARGET_MEMORY_MS);
+    /** The CELL last seen as up-facing, or null if none seen yet. */
+    public Cell getCell() {
+        return cell;
     }
 
-    public void setPipeline(int pipelineIndex) {
-        limelight.pipelineSwitch(pipelineIndex);
+    /** Horizontal angle from the crosshair to the cluster, degrees. Positive = target is to the right. */
+    public double getTx() {
+        return tx;
+    }
+
+    public double getTy() {
+        return ty;
+    }
+
+    /** Horizontal distance from the camera to the up CELL's tag cluster, inches. */
+    public double getDistanceInches() {
+        return distanceIn;
+    }
+
+    public void setPipeline(int index) {
+        limelight.pipelineSwitch(index);
     }
 
     public void stop() {
