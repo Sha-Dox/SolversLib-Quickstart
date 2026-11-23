@@ -24,7 +24,9 @@ public class FieldConstants {
         FAR
     }
 
-    // --- AprilTag IDs per CELL (manual 9.9) ---
+    // --- AprilTag IDs per CELL (manual 9.9; same clusters as the SDK's getBioBuzzTagLibrary(), which
+    // names them RED SCORING 30, RED AUDIENCE 34, BLUE AUDIENCE 38, BLUE SCORING 42). The SDK gives no
+    // field positions for them because the HIVE pivots, hence the measured CELL points below. ---
     public static final int[] RED_FAR_TAGS = {30, 31, 32, 33};
     public static final int[] RED_AUDIENCE_TAGS = {34, 35, 36, 37};
     public static final int[] BLUE_AUDIENCE_TAGS = {38, 39, 40, 41};

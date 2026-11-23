@@ -113,11 +113,11 @@ public class AimSolver extends SubsystemBase {
                 distanceIn = vision.getDistanceInches();
             }
         } else if (source != Source.NONE) {
-            double goalX = FieldConstants.cellX(alliance) + corrX;
-            double goalY = FieldConstants.cellY(cell) + corrY;
-            double bearing = Math.atan2(goalY - pivotY, goalX - pivotX);
+            double cellX = FieldConstants.cellX(alliance) + corrX;
+            double cellY = FieldConstants.cellY(cell) + corrY;
+            double bearing = Math.atan2(cellY - pivotY, cellX - pivotX);
             turretTargetDeg = Math.toDegrees(normalize(bearing - heading));
-            distanceIn = Math.hypot(goalX - pivotX, goalY - pivotY);
+            distanceIn = Math.hypot(cellX - pivotX, cellY - pivotY);
         }
         reachable = !turret.isOutOfRange(turretTargetDeg);
 

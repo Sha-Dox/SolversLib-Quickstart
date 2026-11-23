@@ -41,12 +41,12 @@ public class Shooter extends SubsystemBase {
     // RPM the shooter is considered "ready" within.
     public static double READY_TOLERANCE_RPM = 75;
 
-    // Lookup table: distance to the goal (inches) -> flywheel RPM. Fill it in from test shots: park at
+    // Lookup table: distance to the up CELL (inches) -> flywheel RPM. Fill it in from test shots: park at
     // a distance, adjust RPM on the dashboard until shots land, write the pair here. Keep DISTANCE_IN
     // ascending. Values in between are linearly interpolated; outside the table the end value is used.
     public static double[] DISTANCE_IN = {24, 48, 72, 96, 120, 144};          // TODO: tune
     public static double[] RPM_AT_DISTANCE = {2400, 2700, 3000, 3300, 3600, 3900}; // TODO: tune
-    public static double DEFAULT_RPM = 3000; // used when the Limelight can't see the goal
+    public static double DEFAULT_RPM = 3000; // used when there's no aim solution (no pose, no tags)
 
     private final DcMotorEx motor;
     private final VoltageSensor voltageSensor;
