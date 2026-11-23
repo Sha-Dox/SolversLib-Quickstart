@@ -16,9 +16,16 @@ import com.seattlesolvers.solverslib.util.TelemetryData;
  * Angles are in degrees, 0 = facing robot-forward, positive = counter-clockwise (left), the same
  * convention Pedro uses for heading.
  * <p>
- * The Through Bore's quadrature output is relative, so the turret MUST face straight forward the
- * first time an OpMode runs after the robot powers on. That position becomes 0 and is kept across
- * OpModes (auto -> teleop) until the app restarts. {@link #rezero()} re-zeros on demand.
+ * <b>Zeroing is hardcoded to a physical reference position, captured at robot power-on.</b>
+ * The Through Bore's quadrature output is relative: the hub starts counting from 0 when it powers up and
+ * keeps that count across OpModes (the SDK only switches motors to RUN_WITHOUT_ENCODER between
+ * OpModes, it never resets the count). So no OpMode zeros the turret by itself: whatever the turret
+ * does during auto, teleop still knows exactly where it is. The only ways to re-zero are
+ * {@link #rezero()} (Back during INIT, with the turret at the reference) or a hub power cycle.
+ * <p>
+ * The reference is wherever the turret sits at power-on, and {@link #REFERENCE_DEG} says what angle
+ * that is. Leave it 0 and line the turret up with a forward mark, or (more repeatable) push it against
+ * a hard stop at power-on and set REFERENCE_DEG to that stop's angle, e.g. -170.
  */
 @Config
 public class Turret extends SubsystemBase {
@@ -36,6 +43,9 @@ public class Turret extends SubsystemBase {
     // Encoder revolutions per turret revolution. 1.0 if the encoder sits on the turret axis itself.
     public static double ENCODER_TO_TURRET_RATIO = 1.0; // TODO: verify
 
+    // Angle of the turret at its power-on reference position (see class docs). Hardcoded on purpose.
+    public static double REFERENCE_DEG = 0.0;
+
     // Soft limits so the turret never winds up its wiring. Keep a margin inside the hard stops.
     public static double MIN_DEG = -160; // TODO: set from the robot
     public static double MAX_DEG = 160;  // TODO: set from the robot
@@ -49,9 +59,6 @@ public class Turret extends SubsystemBase {
     public static double kS = 0.04;     // min power to break static friction
     public static double TOLERANCE_DEG = 1.5;
     public static double MAX_POWER = 0.8;
-
-    // Survives OpMode changes (same as PoseStorage) so auto -> teleop doesn't lose the zero.
-    private static boolean sZeroed = false;
 
     private final DcMotorEx motor;
     private final DcMotorEx encoder;
@@ -74,9 +81,7 @@ public class Turret extends SubsystemBase {
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         motor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
-        if (!sZeroed) {
-            rezero();
-        }
+        // Deliberately NO encoder reset here: the count since power-on is the source of truth.
         angleDeg = readAngle();
         targetDeg = angleDeg;
         timer.reset();
@@ -153,22 +158,25 @@ public class Turret extends SubsystemBase {
         return deg < MIN_DEG || deg > MAX_DEG;
     }
 
-    /** Make the current position the new 0 (turret must face robot-forward). */
+    /**
+     * The turret is at its reference position right now: reset the count so it reads
+     * {@link #REFERENCE_DEG}. Only call this from INIT or a test OpMode, never mid-match.
+     */
     public void rezero() {
         // STOP_AND_RESET also stops the motor on that port for one cycle; put it back in open-loop mode
         // straight away so a shared port (e.g. the intake) keeps working.
         encoder.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         encoder.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        sZeroed = true;
-        angleDeg = 0.0;
-        targetDeg = 0.0;
+        angleDeg = REFERENCE_DEG;
+        targetDeg = REFERENCE_DEG;
         lastError = 0.0;
         integral = 0.0;
     }
 
-    private double readAngle() {
+    /** Read the encoder now (also works during INIT, before periodic() runs). */
+    public double readAngle() {
         double ticks = encoder.getCurrentPosition() * (ENCODER_REVERSED ? -1 : 1);
-        return ticks / (ENCODER_CPR * ENCODER_TO_TURRET_RATIO) * 360.0;
+        return REFERENCE_DEG + ticks / (ENCODER_CPR * ENCODER_TO_TURRET_RATIO) * 360.0;
     }
 
     private static double clamp(double deg) {

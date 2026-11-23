@@ -35,7 +35,8 @@ import org.firstinspires.ftc.teamcode.subsystems.Vision;
  *   D-pad left/right  nudge aim trim 1 deg        D-pad down      clear trim
  *   D-pad up          switch target CELL (audience / far) until the camera sees which one is up
  *   Start             reset pose to the alliance reset spot (see FieldConstants)
- *   Back              re-zero turret (turret must be facing straight forward)
+ *   Back (INIT only)  re-zero turret: only with the turret at its reference position (Turret docs).
+ *                     Disabled after Start so a stray press can't shift the zero mid-match.
  * </pre>
  */
 public abstract class BaseTeleOp extends CommandOpMode {
@@ -54,6 +55,7 @@ public abstract class BaseTeleOp extends CommandOpMode {
 
     private boolean aimEnabled = true;
     private double trimDeg = 0.0;
+    private boolean backWasPressed = false;
 
     public BaseTeleOp(Alliance alliance) {
         this.alliance = alliance;
@@ -85,6 +87,19 @@ public abstract class BaseTeleOp extends CommandOpMode {
 
         controller = new GamepadEx(gamepad1);
         bindButtons();
+    }
+
+    @Override
+    public void initialize_loop() {
+        // Lets the drive team check the turret zero before the match: with the turret on its reference
+        // mark this should read Turret.REFERENCE_DEG. If it doesn't, put it on the mark and press Back.
+        if (gamepad1.back && !backWasPressed) {
+            mTurret.rezero();
+        }
+        backWasPressed = gamepad1.back;
+        telemetry.addData("Turret angle", "%.1f deg (reference %.1f)", mTurret.readAngle(), Turret.REFERENCE_DEG);
+        telemetry.addLine("Turret on its reference mark but wrong angle? Press BACK to re-zero.");
+        telemetry.update();
     }
 
     @Override
@@ -135,6 +150,5 @@ public abstract class BaseTeleOp extends CommandOpMode {
             mDrive.resetPose(FieldConstants.resetPose(alliance));
             mAim.clearCorrections();
         });
-        controller.getGamepadButton(GamepadKeys.Button.BACK).whenPressed(mTurret::rezero);
     }
 }

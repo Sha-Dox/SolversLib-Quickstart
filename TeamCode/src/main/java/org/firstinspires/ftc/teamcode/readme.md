@@ -16,8 +16,13 @@ FTC SDK 12.0 · SolversLib 0.3.6 · Pedro Pathing 3.0.2
 
 ## First flash checklist
 
-1. **Turret facing straight forward when you power on.** Its 0 is set the first time an OpMode runs.
-   `Back` re-zeros at any time.
+1. **Turret on its reference position when you power on the robot.** The zero is hardcoded to that
+   physical position (`Turret.REFERENCE_DEG`, default 0 = facing forward). No OpMode zeros the turret
+   by itself; the hub keeps counting from power-on through auto and teleop, so the turret moving during
+   auto can't shift it. INIT shows the turret angle; if it's wrong with the turret on the mark,
+   press `Back` during INIT. For the most repeatable zero, power on with the turret against a hard stop
+   and set `REFERENCE_DEG` to that stop's angle (e.g. -170).
+   Don't plug the Through Bore into the `shooter` port: the shooter resets its own encoder.
 2. Run **Mechanism Test**. Check in order:
    - Right stick up turns the turret CCW and `Turret Angle` goes **up**. If not, flip `Turret.MOTOR_REVERSED` / `ENCODER_REVERSED`.
    - Turn the turret one full turn by hand: angle should change by 360. If not, fix `Turret.ENCODER_TO_TURRET_RATIO`.
@@ -57,6 +62,6 @@ The distance to the target picks the flywheel RPM from the lookup table.
 | D-pad left/right, down | trim aim 1°, clear trim |
 | D-pad up | switch target CELL manually |
 | Start | reset pose to the alliance reset spot (`FieldConstants.RESET_*`) |
-| Back | re-zero turret |
+| Back (INIT only) | re-zero turret (turret must be on its reference position) |
 
 Teleop starts from the pose the last OpMode left (`PoseStorage`), or the alliance reset spot if none ran.
