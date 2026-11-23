@@ -37,9 +37,9 @@ public class FieldCentricTurret extends CommandOpMode {
     public static double TARGET_X = 72;
     public static double TARGET_Y = 72;
 
-    private TelemetryData telemetryData;
-    private Follower follower;
-    private Turret turret;
+    protected TelemetryData telemetryData;
+    protected Follower follower;
+    protected Turret turret;
 
     private boolean started = false;
     private boolean tracking = false;
@@ -71,22 +71,20 @@ public class FieldCentricTurret extends CommandOpMode {
         // --- Drive: field-oriented relative to the robot's starting direction ---
         double heading = follower.pose().heading();
         double headingFromStart = heading - Math.toRadians(START_HEADING_DEG);
-        follower.manual(ManualDrive.fieldCentric(
-                -gamepad1.left_stick_y,
-                -gamepad1.left_stick_x,
-                -gamepad1.right_stick_x,
-                headingFromStart));
+        follower.manual(ManualDrive.fieldCentric(forwardInput(), leftInput(), turnInput(), headingFromStart));
 
         // --- Buttons ---
-        if (gamepad1.y && !lastY) {
+        boolean y = aimButton();
+        if (y && !lastY) {
             tracking = !tracking;
         }
-        lastY = gamepad1.y;
+        lastY = y;
 
-        if (gamepad1.start && !lastStart) {
+        boolean reset = resetButton();
+        if (reset && !lastStart) {
             follower.setPose(startPose());
         }
-        lastStart = gamepad1.start;
+        lastStart = reset;
 
         // --- Turret ---
         Pose pose = follower.pose();
@@ -108,6 +106,35 @@ public class FieldCentricTurret extends CommandOpMode {
                 pose.x(), pose.y(), Math.toDegrees(pose.heading())));
         telemetryData.addData("Distance to center (in)", Math.hypot(TARGET_X - pose.x(), TARGET_Y - pose.y()));
         telemetryData.update();
+    }
+
+    // --- Inputs (gamepad 1 here; KeyboardTurret overrides these with the browser keyboard) ---
+
+    /** Drive forward (+) / back (-), -1..1. */
+    protected double forwardInput() {
+        return -gamepad1.left_stick_y;
+    }
+
+    /** Drive left (+) / right (-), -1..1. */
+    protected double leftInput() {
+        return -gamepad1.left_stick_x;
+    }
+
+    /** Turn counter-clockwise (+) / clockwise (-), -1..1. */
+    protected double turnInput() {
+        return -gamepad1.right_stick_x;
+    }
+
+    protected boolean aimButton() {
+        return gamepad1.y;
+    }
+
+    protected boolean resetButton() {
+        return gamepad1.start;
+    }
+
+    protected boolean isTracking() {
+        return tracking;
     }
 
     private static Pose startPose() {
